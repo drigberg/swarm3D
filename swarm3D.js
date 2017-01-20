@@ -1,16 +1,21 @@
 //----------global defaults
 var backgroundColor, numConstellations;
 var swarms;
-const numSwarms = 1;
-const birdSize = 20;
-const speed = 5;
-const rabbitSpeed = 12;
+const numSwarms = 2;
+const birdSize = 10;
+const minSwarmSpeed = 3;
+const maxSwarmSpeed = 18;
+const rabbitSpeed = 20;
 const newDestProb = 0.93
 var maxTurnSpeed, maxAngularAcceleration;
 var lightZ = -1000;
-const minBirds = 10;
-const maxBirds = 40;
+const minBirds = 100;
+const maxBirds = 200;
 const rabbitSize = 50;
+const flockDistance = 75;
+
+var flock = true;
+var wanderEnabled = true;
 
 //=========================
 //Setup & draw functions
@@ -39,9 +44,9 @@ function setInitialValues(){
 
 function resetBirds(){
     swarms = new Array(numSwarms);
-    skyRabbit = new SkyRabbit(random(0, width), random(0, height), random(0, -3000), rabbitSize);
+    skyRabbit = new SkyRabbit(random(-1 * windowWidth, windowWidth), random(-1 * windowHeight, windowHeight), random(0, -3000), rabbitSize);
     for (var i = 0; i < swarms.length; i++) {
-        swarms[i] = new Swarm(random(0, width), random(0, height), random(0, -3000), random(0, width), random(0, height), random(0, -3000));
+        swarms[i] = new Swarm(random(-1 * windowWidth, windowWidth), random(-1 * windowHeight, windowHeight), random(0, -3000), skyRabbit);
     };
 
 };
@@ -54,33 +59,34 @@ function draw() {
     ambientLight(100);
     pointLight(250, 250, 250, 500, 600, lightZ);
     skyRabbit.update();
+    updateBirds();
 
+
+
+};
+
+function updateBirds(){
     for (var i = 0; i < swarms.length; i++) {
         // fill(swarms[i].r, swarms[i].g, swarms[i].b);
         for (var j = 0; j < swarms[i].birds.length; j++) {
             swarms[i].birds[j].update();
         };
     };
-
-
-};
+}
 
 
 //=========================
 //Classes
 //=========================
-var Swarm = function(spawnX, spawnY, spawnZ, destX, destY, destZ){
+var Swarm = function(spawnX, spawnY, spawnZ, target){
   //collection of stars and lines which connect them, or single star
-  this.target = {
-      x : skyRabbit.x,
-      y : skyRabbit.y,
-      z : skyRabbit.z
-  };
+  this.target = target;
   this.birds = [];
   this.wander = 0;
-  this.r = 0;
-  this.g = 0;
-  this.b = 0;
+  this.speed = random(minSwarmSpeed, maxSwarmSpeed);
+  this.r = random(0, 255);
+  this.g = random(0, 255);
+  this.b = random(0, 255);
   this.a = 0.5
   this.spawnX = spawnX;
   this.spawnY = spawnY;
@@ -111,15 +117,15 @@ var SkyRabbit = function(x, y, z, r){
 
     this.updateTarget = function() {
         this.target = {
-            x : random(-1 * width, width),
-            y : random(-1 * height, height),
+            x : random(-1 * windowWidth, windowWidth),
+            y : random(-1 * windowHeight, windowHeight),
             z : random(0, -2000)
         };
     };
 
-    this.turnTowardsTarget = function() {
+    this.turnTowards = function(target) {
         var sumVector;
-        var vectorToTarget = findUnitVector(this.x, this.y, this.z, this.target.x, this.target.y, this.target.z);
+        var vectorToTarget = findUnitVector(this.x, this.y, this.z, target.x, target.y, target.z);
         sumVector = findUnitVector(
             0,
             0,
@@ -139,7 +145,7 @@ var SkyRabbit = function(x, y, z, r){
             this.updateTarget();
         };
 
-        this.turnTowardsTarget();
+        this.turnTowards(this.target);
 
         this.x += this.vector.x * this.vector.magnitude;
         this.y += this.vector.y * this.vector.magnitude;
@@ -157,7 +163,7 @@ var SkyRabbit = function(x, y, z, r){
         var translateY = this.y;
         var translateZ = this.z;
 
-        specularMaterial(0, 250, 0);
+        specularMaterial(100, 100, 250);
 
         translate(translateX, translateY, translateZ);
         sphere(this.radius);
@@ -174,19 +180,22 @@ var Bird = function(parentSwarm, x, y, z, r){
     this.y = y + random(-1 * this.spread, this.spread);
     this.z = z + random(-1 * this.spread, this.spread);
     this.radius = r;
-    this.vector = new Vector(0, -1, 0, speed);
-    this.turnTowardsTarget = function() {
-        this.wander = {
-            x : random(-0.1, 0.1),
-            y : random(-0.1, 0.1),
-            z : random(-0.1, 0.1)
+    this.vector = new Vector(0, -1, 0, this.parentSwarm.speed);
+    this.wander = {
+        x : 0,
+        y : 0,
+        z : 0
+    };
+    this.turnTowards = function(target) {
+        if (wanderEnabled) {
+            this.wander = {
+                x : random(-0.1, 0.1),
+                y : random(-0.1, 0.1),
+                z : random(-0.1, 0.1)
+            };
         };
+
         var sumVector;
-        var target = {
-            x : skyRabbit.x,
-            y : skyRabbit.y,
-            z : skyRabbit.z
-        };
         var vectorToTarget = findUnitVector(this.x, this.y, this.z, target.x, target.y, target.z);
         sumVector = findUnitVector(
             0,
@@ -197,13 +206,52 @@ var Bird = function(parentSwarm, x, y, z, r){
             this.vector.z + vectorToTarget.z * 0.1 + this.wander.z
         );
 
-        sumVector.magnitude = speed;
+        sumVector.magnitude = this.parentSwarm.speed;
         this.vector = sumVector;
     };
 
-    this.update = function(){
-        this.turnTowardsTarget();
+    this.turnAway = function(target) {
+        if (wanderEnabled) {
+            this.wander = {
+                x : random(-0.1, 0.1),
+                y : random(-0.1, 0.1),
+                z : random(-0.1, 0.1)
+            };
+        };
 
+        var sumVector;
+        var vectorToTarget = findUnitVector(this.x, this.y, this.z, target.x, target.y, target.z);
+        sumVector = findUnitVector(
+            0,
+            0,
+            0,
+            this.vector.x - vectorToTarget.x * 0.1,
+            this.vector.y - vectorToTarget.y * 0.1,
+            this.vector.z - vectorToTarget.z * 0.1
+        );
+
+        sumVector.magnitude = this.parentSwarm.speed;
+        this.vector = sumVector;
+    };
+
+    this.flockAwareness = function(){
+        for (var i = 0; i < swarms.length; i++) {
+            // fill(swarms[i].r, swarms[i].g, swarms[i].b);
+            for (var j = 0; j < swarms[i].birds.length; j++) {
+                let otherBird = swarms[i].birds[j];
+                let distance = findDistance(this.x, this.y, this.z, otherBird.x, otherBird.y, otherBird.z);
+                if (distance < flockDistance) {
+                    this.turnAway(otherBird);
+                };
+            };
+        };
+    };
+
+    this.update = function(){
+        this.turnTowards(this.parentSwarm.target);
+        if (flock) {
+            this.flockAwareness();
+        }
         this.x += this.vector.x * this.vector.magnitude;
         this.y += this.vector.y * this.vector.magnitude;
         this.z += this.vector.z * this.vector.magnitude;
@@ -220,7 +268,7 @@ var Bird = function(parentSwarm, x, y, z, r){
         var translateY = this.y;
         var translateZ = this.z;
 
-        specularMaterial(250, 50, 250);
+        specularMaterial(this.parentSwarm.r, this.parentSwarm.g, this.parentSwarm.b);
 
         translate(translateX, translateY, translateZ);
         sphere(this.radius);
@@ -236,9 +284,18 @@ var Vector = function(x, y, z, magnitude) {
 };
 
 //=========================
-//Movement functions
+//Interactivity functions
 //=========================
-
+function keyPressed() {
+    if (keyCode) {
+        switch (keyCode) {
+            case 32:
+                flock = !flock;
+                console.log(flock);
+                break;
+        };
+    };
+};
 
 //=========================
 //Angle functions
