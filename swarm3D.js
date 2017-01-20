@@ -2,17 +2,19 @@
 var backgroundColor, numConstellations;
 var swarms;
 const numSwarms = 2;
-const birdSize = 10;
+const birdSize = 8;
 const minSwarmSpeed = 3;
 const maxSwarmSpeed = 18;
 const rabbitSpeed = 20;
-const newDestProb = 0.93
-var maxTurnSpeed, maxAngularAcceleration;
+const newDestProb = 0.007
 var lightZ = -1000;
-const minBirds = 100;
-const maxBirds = 200;
+const minBirds = 50;
+const maxBirds = 300;
 const rabbitSize = 50;
-const flockDistance = 75;
+const minFlockDistance = 50;
+const maxFlockDistance = 100;
+const maxDistance = -5000;
+const initialSpread = 200;
 
 var flock = true;
 var wanderEnabled = true;
@@ -23,30 +25,23 @@ var wanderEnabled = true;
 function setup() {
     makeCanvas();
     resetBirds();
-    setInitialValues();
 }
 
 function makeCanvas(){
     var canvas = createCanvas(($(window).width()), $(window).height() + 50, WEBGL);
     canvas.parent('canvas-background');
-    backgroundColor = "rgba(0, 0, 0, 1)";
+    backgroundColor = "rgba(255, 255, 255, 1)";
 };
 
 function windowResized() {
 	resizeCanvas(windowWidth, windowHeight);
 }
 
-function setInitialValues(){
-    emptyVector = [0,0];
-    maxTurnSpeed = 0.1;
-    maxAngularAcceleration = 0.04;
-};
-
 function resetBirds(){
     swarms = new Array(numSwarms);
-    skyRabbit = new SkyRabbit(random(-1 * windowWidth, windowWidth), random(-1 * windowHeight, windowHeight), random(0, -3000), rabbitSize);
+    skyRabbit = new SkyRabbit(random(-1 * windowWidth, windowWidth), random(-1 * windowHeight, windowHeight), random(0, maxDistance), rabbitSize);
     for (var i = 0; i < swarms.length; i++) {
-        swarms[i] = new Swarm(random(-1 * windowWidth, windowWidth), random(-1 * windowHeight, windowHeight), random(0, -3000), skyRabbit);
+        swarms[i] = new Swarm(random(-1 * windowWidth, windowWidth), random(-1 * windowHeight, windowHeight), random(0, maxDistance), skyRabbit);
     };
 
 };
@@ -57,12 +52,10 @@ function draw() {
     background(backgroundColor);
     noStroke();
     ambientLight(100);
-    pointLight(250, 250, 250, 500, 600, lightZ);
+    pointLight(250, 100, 250, -1000, -1000, lightZ);
+    pointLight(100, 250, 250, 1000, 1000, lightZ);
     skyRabbit.update();
     updateBirds();
-
-
-
 };
 
 function updateBirds(){
@@ -79,7 +72,8 @@ function updateBirds(){
 //Classes
 //=========================
 var Swarm = function(spawnX, spawnY, spawnZ, target){
-  //collection of stars and lines which connect them, or single star
+  //collection of birds with a common target, speed, and color
+  // to-do: give individual speeds to birds, add acceleration to flocking
   this.target = target;
   this.birds = [];
   this.wander = 0;
@@ -87,6 +81,7 @@ var Swarm = function(spawnX, spawnY, spawnZ, target){
   this.r = random(0, 255);
   this.g = random(0, 255);
   this.b = random(0, 255);
+  this.flockDistance = random(minFlockDistance, maxFlockDistance);
   this.a = 0.5
   this.spawnX = spawnX;
   this.spawnY = spawnY;
@@ -101,16 +96,22 @@ var Swarm = function(spawnX, spawnY, spawnZ, target){
 };
 
 var SkyRabbit = function(x, y, z, r){
-    //set of coordinates, radius, and color
+    //a flying target that changes destination randomly
     var that = this;
     this.x = x;
     this.y = y;
     this.z = z;
     this.radius = r;
     this.target = {
-        x : random(0, $(window).width()),
-        y : random(0, $(window).height()),
-        z : random(0, -2000)
+        x : random(-1 * windowWidth, windowWidth),
+        y : random(-1 * windowHeight, windowHeight),
+        z : random(maxDistance, 0)
+    };
+
+    this.wander = {
+        x : 0,
+        y : 0,
+        z : 0
     };
 
     this.vector = new Vector(0, -1, 0, rabbitSpeed);
@@ -119,20 +120,37 @@ var SkyRabbit = function(x, y, z, r){
         this.target = {
             x : random(-1 * windowWidth, windowWidth),
             y : random(-1 * windowHeight, windowHeight),
-            z : random(0, -2000)
+            z : random(maxDistance, 0)
         };
     };
 
     this.turnTowards = function(target) {
+        //turning is based on adding vectors and scaling back to unit vector
+        //destination vector is weighted down for gradual turns
+        if (wanderEnabled) {
+            //rabbit wander is less impulsive and sudden than bird wander
+            this.wander.x += random(-0.01, 0.01);
+            this.wander.y += random(-0.01, 0.01);
+            this.wander.z += random(-0.01, 0.01);
+            if (abs(this.wander.x) > 0.09) {
+                this.wander.x *= 0.08
+            };
+            if (abs(this.wander.y) > 0.09) {
+                this.wander.y *= 0.08
+            };
+            if (abs(this.wander.z) > 0.09) {
+                this.wander.z *= 0.08
+            };
+        };
         var sumVector;
         var vectorToTarget = findUnitVector(this.x, this.y, this.z, target.x, target.y, target.z);
         sumVector = findUnitVector(
             0,
             0,
             0,
-            this.vector.x + vectorToTarget.x * 0.1,
-            this.vector.y + vectorToTarget.y * 0.1,
-            this.vector.z + vectorToTarget.z * 0.1
+            this.vector.x + vectorToTarget.x * 0.1 + this.wander.x,
+            this.vector.y + vectorToTarget.y * 0.1 + this.wander.y,
+            this.vector.z + vectorToTarget.z * 0.1 + this.wander.z
         );
 
         sumVector.magnitude = rabbitSpeed;
@@ -140,6 +158,7 @@ var SkyRabbit = function(x, y, z, r){
     };
 
     this.update = function(){
+        //change destination randomly, turn towards it
         var newTarget = random(0, 1);
         if (newTarget < newDestProb) {
             this.updateTarget();
@@ -172,9 +191,9 @@ var SkyRabbit = function(x, y, z, r){
 };
 
 var Bird = function(parentSwarm, x, y, z, r){
-    //set of coordinates, radius, and color
+    //member of a swarm
     var that = this;
-    this.spread = 200;
+    this.spread = initialSpread;
     this.parentSwarm = parentSwarm;
     this.x = x + random(-1 * this.spread, this.spread);
     this.y = y + random(-1 * this.spread, this.spread);
@@ -187,6 +206,8 @@ var Bird = function(parentSwarm, x, y, z, r){
         z : 0
     };
     this.turnTowards = function(target) {
+        //turning is based on adding vectors and scaling back to unit vector
+        //destination vector is weighted down for gradual turns
         if (wanderEnabled) {
             this.wander = {
                 x : random(-0.1, 0.1),
@@ -211,14 +232,7 @@ var Bird = function(parentSwarm, x, y, z, r){
     };
 
     this.turnAway = function(target) {
-        if (wanderEnabled) {
-            this.wander = {
-                x : random(-0.1, 0.1),
-                y : random(-0.1, 0.1),
-                z : random(-0.1, 0.1)
-            };
-        };
-
+        //used for flocking
         var sumVector;
         var vectorToTarget = findUnitVector(this.x, this.y, this.z, target.x, target.y, target.z);
         sumVector = findUnitVector(
@@ -235,12 +249,12 @@ var Bird = function(parentSwarm, x, y, z, r){
     };
 
     this.flockAwareness = function(){
+        //allows birds to maintain constant distance from neighbors
         for (var i = 0; i < swarms.length; i++) {
-            // fill(swarms[i].r, swarms[i].g, swarms[i].b);
             for (var j = 0; j < swarms[i].birds.length; j++) {
                 let otherBird = swarms[i].birds[j];
                 let distance = findDistance(this.x, this.y, this.z, otherBird.x, otherBird.y, otherBird.z);
-                if (distance < flockDistance) {
+                if (distance < this.parentSwarm.flockDistance) {
                     this.turnAway(otherBird);
                 };
             };
@@ -300,18 +314,6 @@ function keyPressed() {
 //=========================
 //Angle functions
 //=========================
-function findAnglesFromAxes(vector) {
-    var xAxis = [1, 0, 0];
-    var yAxis = [0, 1, 0];
-    var zAxis = [0, 0, 1];
-
-    var xAngle = findAngle(vector, xAxis);
-    var yAngle = findAngle(vector, yAxis);
-    var zAngle = findAngle(vector, zAxis);
-
-    return [xAngle, yAngle, zAngle];
-};
-
 function findUnitVector(x1, y1, z1, x2, y2, z2) {
     //calculates normal vector between two points (in order), converts to unit vector
     var normalVector = new Vector(x2 - x1, y2 - y1, z2 - z1, null);
